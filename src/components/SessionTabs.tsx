@@ -1,0 +1,55 @@
+import clsx from 'clsx'
+import { SquareTerminal, X } from 'lucide-react'
+import { presetMeta } from '../domain/cli'
+import type { CliSessionSnapshot } from '../types/electron'
+
+type SessionTabsProps = {
+  sessions: CliSessionSnapshot[]
+  activeId: string
+  onActivate: (id: string) => void
+  onStop: (id: string) => void
+}
+
+export function SessionTabs({ sessions, activeId, onActivate, onStop }: SessionTabsProps) {
+  return (
+    <div className="flex h-14 shrink-0 items-end border-b border-cyan-400/20 bg-[#091018] px-3">
+      <div className="flex h-full items-end gap-1 overflow-x-auto">
+        {sessions.length === 0 && (
+          <div className="mb-3 flex items-center gap-2 text-sm text-zinc-500">
+            <SquareTerminal size={16} aria-hidden="true" />
+            No running sessions
+          </div>
+        )}
+        {sessions.map((session) => {
+          const meta = presetMeta[session.preset]
+          const PresetIcon = meta.icon
+          const isActive = session.id === activeId
+          return (
+            <div key={session.id} className={clsx('tui-tab group', isActive && 'active')}>
+              <button
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                type="button"
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => onActivate(session.id)}
+              >
+                <PresetIcon size={16} className={meta.accent} aria-hidden="true" />
+                <span className="truncate">{session.title}</span>
+                <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                  {meta.short}
+                </span>
+              </button>
+              <button
+                className="rounded p-0.5 text-zinc-500 opacity-0 transition-opacity hover:bg-rose-300/10 hover:text-rose-200 group-hover:opacity-100 focus:opacity-100"
+                type="button"
+                aria-label={`Close ${session.title}`}
+                onClick={() => onStop(session.id)}
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
