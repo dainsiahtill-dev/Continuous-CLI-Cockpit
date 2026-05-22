@@ -25,6 +25,7 @@ function CockpitApp() {
     refreshSessions,
     createSession,
     stopSession,
+    renameSession,
     upsertActiveSession,
   } = useCliSessions()
   const selectedSessionId = activeId || activeSession?.id || ''
@@ -46,6 +47,7 @@ function CockpitApp() {
               activeId={selectedSessionId}
               sessions={sessions}
               onActivate={setActiveId}
+              onRename={renameSession}
               onStop={stopSession}
             />
             <div className="flex min-h-0 flex-1 gap-3 p-3">

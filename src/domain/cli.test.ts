@@ -27,6 +27,7 @@ function makeSession(id: string, title: string): CliSessionSnapshot {
     outputTail: '',
     transcriptPath: 'C:\\transcripts\\one.log',
     lastSuggestedPrompt: '',
+    hasSessionPolicyOverride: false,
     events: [],
     attached: true,
   }

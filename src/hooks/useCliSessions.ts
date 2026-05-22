@@ -12,6 +12,7 @@ export type CliSessionController = {
   refreshSessions: () => Promise<CliSessionSnapshot[]>
   createSession: (config: CliSessionConfig) => Promise<CliSessionSnapshot>
   stopSession: (id: string) => Promise<void>
+  renameSession: (id: string, title: string) => Promise<void>
   upsertActiveSession: (session: CliSessionSnapshot) => void
 }
 
@@ -88,6 +89,11 @@ export function useCliSessions(): CliSessionController {
     [activeId, sessions],
   )
 
+  const renameSession = useCallback(async (id: string, title: string) => {
+    const updated = await window.cliAPI.renameSession({ id, title })
+    if (updated) setSessions((current) => upsertSession(current, updated))
+  }, [])
+
   const upsertActiveSession = useCallback((session: CliSessionSnapshot) => {
     setSessions((current) => upsertSession(current, session))
     setActiveId(session.id)
@@ -103,6 +109,7 @@ export function useCliSessions(): CliSessionController {
     refreshSessions,
     createSession,
     stopSession,
+    renameSession,
     upsertActiveSession,
   }
 }

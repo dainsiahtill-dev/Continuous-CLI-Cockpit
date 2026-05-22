@@ -60,6 +60,7 @@ function makeSession(patch: Partial<CliSessionSnapshot> = {}): CliSessionSnapsho
     outputTail: '',
     transcriptPath: 'C:\\transcripts\\session.log',
     lastSuggestedPrompt: '',
+    hasSessionPolicyOverride: false,
     events: [],
     attached: true,
     ...patch,

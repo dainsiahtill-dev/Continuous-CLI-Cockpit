@@ -30,6 +30,7 @@ This document tracks the current implementation state and the most important rem
 - prompt presets for short actions, role templates, task protocols, and subagent coordination prompts
 - Autopilot pipeline visualization with decision reason, cooldown context, prompt-file audit path, and interrupt control
 - task-focused Cockpit tabs for Session, Launch, Auto, and Logs
+- editable session tab names persisted with session state
 
 ### Runner Backends
 
@@ -60,6 +61,8 @@ This document tracks the current implementation state and the most important rem
 - hard idle detection
 - done marker detection
 - local `policies/default.json` watchdog policy
+- project-scoped watchdog policy overrides by working directory
+- session-scoped copy-on-write watchdog policy overrides
 - Autopilot policy preview in the Cockpit panel
 - visual policy editor with recovery routing, circuit breaker controls, regex validation, and reset
 - policy import and export actions
@@ -76,6 +79,7 @@ This document tracks the current implementation state and the most important rem
 
 - context isolation and BrowserWindow sandbox enabled
 - main-process IPC runtime validation
+- cybernetic and scientific-method architecture specification
 - ESLint, Prettier, TypeScript, Vitest scripts
 - Vitest coverage for domain helpers, run-mode selector, and launch form state
 - Vitest coverage for prompt preset task insertion
@@ -113,6 +117,7 @@ Timeline rows seed transcript search terms, but the app does not yet store byte 
 - tmux unavailable path
 - tmux attach path
 - prompt injection file creation
+- project-scoped policy load/save/reset behavior
 - policy-routed waiting, blocked, exited, and circuit-breaker behavior
 - preset and policy import validation
 
@@ -134,3 +139,9 @@ Timeline rows seed transcript search terms, but the app does not yet store byte 
 - last capture time
 
 5. Package and smoke-test the production desktop build outside Vite dev mode.
+
+6. Add control-loop replay and experiment tooling:
+
+- saved transcript replay fixtures
+- post-intervention outcome metrics
+- policy experiment log with hypothesis, prediction, result, and conclusion

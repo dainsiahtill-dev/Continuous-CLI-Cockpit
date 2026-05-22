@@ -4,6 +4,20 @@ Continuous CLI Cockpit is a desktop control console for existing command-line to
 
 The product should not become a replacement agent runtime. The primary CLI remains the executor. The app is a cockpit around real terminals.
 
+The cockpit architecture follows a cybernetic loop and a scientific-method loop:
+
+```text
+Observe terminal/process evidence
+  -> estimate session state
+  -> choose a bounded policy action
+  -> act through the same CLI terminal
+  -> verify the next signal
+  -> record evidence
+  -> revise policy only through explicit operator action
+```
+
+This makes every automation rule a testable hypothesis rather than hidden behavior.
+
 ## Architecture Diagram
 
 ```text
@@ -20,6 +34,7 @@ React renderer
             -> tmux detached shell through local tmux or WSL
        -> watchdog classifier
        -> recovery policy router
+       -> default and project-scoped policy stores
        -> recovery prompt generator
             -> local continue prompt
             -> Claude headless, then Gemini headless
@@ -92,7 +107,7 @@ Terminal output
 
 Recovery
   -> watchdog state
-  -> recovery policy rule
+  -> default or project policy rule
   -> local prompt, fallback agent prompt, auto resume, or interrupt
   -> write .continuous/prompts/*.md
   -> inject one-line file-read instruction
@@ -113,7 +128,7 @@ The durable session snapshot contains identity, working directory, selected CLI 
 
 The live PTY object is never persisted. `pty` sessions restore history only. `tmux` sessions can survive Electron shutdown and can be reattached if the tmux process still exists.
 
-Preset and watchdog policy JSON files are app-level state. They are validated in the main process before use so the renderer cannot install malformed regex rules, invalid recovery actions, unsafe routing, or incomplete CLI presets.
+Preset JSON is app-level state. Watchdog policy has an app default, project-scoped overrides keyed by working directory, and session-scoped copy-on-write overrides keyed by session id. They are validated in the main process before use so the renderer cannot install malformed regex rules, invalid recovery actions, unsafe routing, or incomplete CLI presets.
 
 ## UX Principles
 
@@ -122,6 +137,8 @@ Preset and watchdog policy JSON files are app-level state. They are validated in
 - Manual mode is the default. Automation is explicit.
 - Assisted mode suggests but does not inject automatically.
 - Autopilot is reserved for long-running work where continuation is acceptable.
+- Project-specific automation behavior is explicit and persisted by working directory.
+- Session-specific automation experiments are isolated until the operator promotes them to the project policy.
 - Prompt injection is auditable through prompt files instead of invisible large pastes.
 - The UI avoids strategy jargon. It exposes operational facts: mode, shell, runner, attach state, idle time, cooldown, retries, and timeline.
 - Terminal output stays visually dominant; the right panel is compact and task-focused.
@@ -159,6 +176,7 @@ Preset and watchdog policy JSON files are app-level state. They are validated in
 - Manual-intervention patterns and circuit breaking force Autopilot back to Manual mode instead of looping.
 - Long prompts are written to project-local files before a short terminal instruction is injected.
 - Session export bundles metadata, events, output tail, transcript, policy, and last recovery suggestion for review.
+- Session tab names are operator-editable and persisted with session state.
 - The UI includes policy editing/import/export, preset import/export/reset, transcript search/windowed rendering, timeline-seeded transcript lookup, session diagnostics, and ended-session archive/clear operations.
 
 ## Current Best Next Step

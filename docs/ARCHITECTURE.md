@@ -4,6 +4,8 @@ Continuous CLI Cockpit is a desktop control plane for real interactive command-l
 
 The core invariant is simple: the primary CLI remains the only executor. The cockpit observes, records, suggests, and optionally injects prompts back into the same terminal session.
 
+The architecture is also defined as a control system. The primary CLI and project are the controlled system; terminal streams, transcripts, screen snapshots, and tmux diagnostics are sensors; the watchdog is the state estimator; policy routing is the controller; prompt injection and mode changes are actuators; the human operator and circuit breaker are supervisory controls. See [Control System Architecture](CONTROL_SYSTEM_ARCHITECTURE.md) for the full cybernetic and scientific-method model.
+
 ## Layers
 
 ```text
@@ -30,6 +32,7 @@ The React renderer owns:
 - control mode selection
 - xterm.js terminal rendering
 - session tabs
+- persisted session tab naming
 - live status display
 - timeline display
 - manual prompt injection controls
@@ -101,6 +104,7 @@ The Electron main process owns:
 - terminal data fanout
 - watchdog classification
 - recovery policy routing
+- default and project-scoped watchdog policy management
 - recovery prompt generation
 - prompt-file writing
 - transcript file writing
@@ -212,7 +216,13 @@ Watchdog policy is stored at:
 <Electron userData>/continuous/policies/default.json
 ```
 
-The policy can be edited from the Cockpit panel. The main process validates numeric bounds, regex syntax, recovery rule actions, and circuit-breaker settings before applying it.
+Project-specific watchdog policies are stored at:
+
+```text
+<Electron userData>/continuous/policies/projects.json
+```
+
+The active session resolves policy through default, project, and session scopes. A session starts synchronized with its project policy. Editing policy inside the session creates a session override, so experimental prompt changes do not affect other sessions. `Save to project` promotes the session draft to the project policy and clears the session override. Policies can be edited from the Cockpit panel. The main process validates numeric bounds, regex syntax, recovery rule actions, and circuit-breaker settings before applying them.
 
 CLI presets are stored at:
 
@@ -259,6 +269,8 @@ It checks:
 - hard idle timeout from the policy file
 
 The watchdog only acts automatically in Autopilot mode. In Manual and Assisted modes it records status, but does not auto-inject recovery prompts.
+
+Autopilot policy is resolved per session. This lets different projects use different done markers, regex patterns, thresholds, and recovery prompt templates while allowing one session to run an experimental override without polluting parallel sessions.
 
 Autopilot actions are routed through recovery rules instead of hardcoded branches:
 

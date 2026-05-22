@@ -28,8 +28,17 @@ export function useSessionControls(
   activeSession: CliSessionSnapshot | undefined,
   onUpdated: (session: CliSessionSnapshot) => void,
 ): SessionControls {
-  const [manualPrompt, setManualPrompt] = useState('')
+  const [manualPrompts, setManualPrompts] = useState<Record<string, string>>({})
   const [lastExportPath, setLastExportPath] = useState('')
+  const manualPrompt = activeSession ? (manualPrompts[activeSession.id] ?? '') : ''
+
+  const setManualPrompt = useCallback(
+    (prompt: string) => {
+      if (!activeSession) return
+      setManualPrompts((current) => ({ ...current, [activeSession.id]: prompt }))
+    },
+    [activeSession],
+  )
 
   const updateControl = useCallback(
     async (patch: ControlPatch) => {

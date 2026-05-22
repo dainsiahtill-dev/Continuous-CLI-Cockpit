@@ -90,6 +90,7 @@ type CliSession = {
   screenCapturedAt: number
   transcriptPath: string
   lastSuggestedPrompt: string
+  sessionOverrides: WatchdogPolicy | undefined
   events: CliEvent[]
   attached: boolean
   ruleRetryCounts: Record<string, number>
@@ -100,7 +101,7 @@ type CliSession = {
 type CliSnapshot = Omit<
   CliSession,
   'ptyProcess' | 'recoveryInFlight' | 'ruleRetryCounts' | 'screenText' | 'screenCapturedAt'
->
+> & { hasSessionPolicyOverride: boolean }
 
 type RecoveryState = 'waiting' | 'soft_stall' | 'hard_stall' | 'blocked' | 'exited' | 'manual_intervention'
 type RecoveryAction = 'inject_local_prompt' | 'trigger_fallback_agent' | 'auto_resume' | 'interrupt'
@@ -190,8 +191,14 @@ type SessionMaintenanceResult = {
   path?: string
 }
 
+type ProjectPolicyEntry = {
+  cwd: string
+  policy: WatchdogPolicy
+}
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
+const appIconPath = join(__dirname, '../../assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png')
 
 const windowSize = { width: 1480, height: 920 }
 const sessions = new Map<string, CliSession>()
@@ -199,6 +206,10 @@ const stoppingSessionIds = new Set<string>()
 let mainWindow: BrowserWindow | null = null
 let persistTimer: NodeJS.Timeout | null = null
 const singleInstanceLock = app.requestSingleInstanceLock()
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('dev.dainsiahtill.continuous-cli-cockpit')
+}
 
 const MAX_EVENTS = 200
 const MAX_TITLE_CHARS = 160
@@ -410,11 +421,9 @@ const defaultWatchdogPolicy: WatchdogPolicy = {
 }
 
 let activePolicy = defaultWatchdogPolicy
-let compiledWaitingPatterns = compilePatternList(defaultWatchdogPolicy.waitingPatterns)
-let compiledBlockedPatterns = compilePatternList(defaultWatchdogPolicy.blockedPatterns)
-let compiledManualInterventionPatterns = compilePatternList(
-  defaultWatchdogPolicy.circuitBreaker.manualInterventionPatterns,
-)
+let activeCompiledPolicy = compilePolicyPatterns(defaultWatchdogPolicy)
+const projectPolicies = new Map<string, ProjectPolicyEntry>()
+const projectCompiledPolicies = new Map<string, ReturnType<typeof compilePolicyPatterns>>()
 
 function appDataDir() {
   return join(app.getPath('userData'), 'continuous')
@@ -430,6 +439,10 @@ function policiesDir() {
 
 function policyFilePath() {
   return join(policiesDir(), 'default.json')
+}
+
+function projectPoliciesFilePath() {
+  return join(policiesDir(), 'projects.json')
 }
 
 function presetsDir() {
@@ -698,13 +711,86 @@ function validatePolicy(policy: WatchdogPolicy) {
   ]
 }
 
+function compilePolicyPatterns(policy: WatchdogPolicy) {
+  return {
+    blockedPatterns: compilePatternList(policy.blockedPatterns),
+    manualInterventionPatterns: compilePatternList(policy.circuitBreaker.manualInterventionPatterns),
+    waitingPatterns: compilePatternList(policy.waitingPatterns),
+  }
+}
+
+function normalizeProjectCwd(cwd: string) {
+  return resolve(cwd.trim() || process.cwd())
+}
+
+function projectPolicyKey(cwd: string) {
+  const normalized = normalizeProjectCwd(cwd)
+  return platform() === 'win32' ? normalized.toLocaleLowerCase() : normalized
+}
+
+function mergeWatchdogPolicy(base: WatchdogPolicy, override: WatchdogPolicy | undefined) {
+  if (!override) return base
+  return normalizeWatchdogPolicy({
+    ...base,
+    ...override,
+    circuitBreaker: {
+      ...base.circuitBreaker,
+      ...override.circuitBreaker,
+    },
+  })
+}
+
+function policyForCwd(cwd?: string) {
+  if (!cwd) return activePolicy
+  return mergeWatchdogPolicy(activePolicy, projectPolicies.get(projectPolicyKey(cwd))?.policy)
+}
+
+function compiledPolicyForCwd(cwd?: string) {
+  if (!cwd) return activeCompiledPolicy
+  return projectCompiledPolicies.get(projectPolicyKey(cwd)) ?? activeCompiledPolicy
+}
+
+function policyForSession(session: CliSession) {
+  return mergeWatchdogPolicy(policyForCwd(session.cwd), session.sessionOverrides)
+}
+
+function compiledPolicyForSession(session: CliSession) {
+  if (session.sessionOverrides) return compilePolicyPatterns(policyForSession(session))
+  return compiledPolicyForCwd(session.cwd)
+}
+
 async function saveActivePolicy(policy: WatchdogPolicy) {
   activePolicy = policy
-  compiledWaitingPatterns = compilePatternList(activePolicy.waitingPatterns)
-  compiledBlockedPatterns = compilePatternList(activePolicy.blockedPatterns)
-  compiledManualInterventionPatterns = compilePatternList(activePolicy.circuitBreaker.manualInterventionPatterns)
+  activeCompiledPolicy = compilePolicyPatterns(activePolicy)
   await mkdir(policiesDir(), { recursive: true })
   await writeFile(policyFilePath(), `${JSON.stringify(activePolicy, null, 2)}\n`, 'utf8')
+}
+
+async function saveProjectPolicies() {
+  await mkdir(policiesDir(), { recursive: true })
+  const payload = {
+    version: 1,
+    projects: Array.from(projectPolicies.values()).map((entry) => ({
+      cwd: entry.cwd,
+      policy: entry.policy,
+    })),
+  }
+  await writeFile(projectPoliciesFilePath(), `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+}
+
+async function saveProjectPolicy(cwd: string, policy: WatchdogPolicy) {
+  const normalizedCwd = normalizeProjectCwd(cwd)
+  const key = projectPolicyKey(normalizedCwd)
+  projectPolicies.set(key, { cwd: normalizedCwd, policy })
+  projectCompiledPolicies.set(key, compilePolicyPatterns(policy))
+  await saveProjectPolicies()
+}
+
+async function resetProjectPolicy(cwd: string) {
+  const key = projectPolicyKey(cwd)
+  projectPolicies.delete(key)
+  projectCompiledPolicies.delete(key)
+  await saveProjectPolicies()
 }
 
 async function loadWatchdogPolicy() {
@@ -727,15 +813,116 @@ async function loadWatchdogPolicy() {
   await saveActivePolicy(activePolicy)
 }
 
+async function loadProjectPolicies() {
+  await mkdir(policiesDir(), { recursive: true })
+  const text = await readFile(projectPoliciesFilePath(), 'utf8').catch(() => '')
+  projectPolicies.clear()
+  projectCompiledPolicies.clear()
+  if (!text) {
+    await saveProjectPolicies()
+    return
+  }
+
+  const parsed: unknown = (() => {
+    try {
+      return JSON.parse(text)
+    } catch {
+      return null
+    }
+  })()
+  const projects = isRecord(parsed) && Array.isArray(parsed.projects) ? parsed.projects : []
+
+  projects.forEach((item) => {
+    if (!isRecord(item) || typeof item.cwd !== 'string') return
+    const policy = normalizeWatchdogPolicy(item.policy)
+    if (policy.hardStallMs < policy.softStallMs) policy.hardStallMs = policy.softStallMs
+    const normalizedCwd = normalizeProjectCwd(item.cwd)
+    const key = projectPolicyKey(normalizedCwd)
+    projectPolicies.set(key, { cwd: normalizedCwd, policy })
+    projectCompiledPolicies.set(key, compilePolicyPatterns(policy))
+  })
+
+  await saveProjectPolicies()
+}
+
+function parsePolicyScope(value: unknown) {
+  const payload: { cwd?: string; sessionId?: string } = {}
+  if (!isRecord(value)) return payload
+  const cwd = readOptionalString(value.cwd, MAX_PATH_CHARS)
+  const sessionId = parseSessionId(value.sessionId)
+  if (cwd?.trim()) payload.cwd = normalizeProjectCwd(cwd)
+  if (sessionId) payload.sessionId = sessionId
+  return payload
+}
+
+function parsePolicySetPayload(value: unknown) {
+  if (isRecord(value) && 'policy' in value) {
+    const scope = parsePolicyScope(value)
+    return { policy: normalizeWatchdogPolicy(value.policy), scope }
+  }
+
+  return { policy: normalizeWatchdogPolicy(value), scope: {} }
+}
+
 async function updateWatchdogPolicy(payload: unknown): Promise<PolicySaveResult> {
-  const policy = normalizeWatchdogPolicy(payload)
+  const { policy, scope } = parsePolicySetPayload(payload)
   const errors = validatePolicy(policy)
   if (errors.length > 0) return { ok: false, errors }
-  await saveActivePolicy(policy)
-  sessions.forEach((session) => {
-    appendEvent(session, 'policy-updated', 'Watchdog policy updated')
-  })
+
+  if (scope.sessionId) {
+    const session = sessions.get(scope.sessionId)
+    if (!session) return { ok: false, errors: ['Session not found.'] }
+    session.sessionOverrides = policy
+    appendEvent(session, 'policy-updated', 'Session watchdog policy override saved')
+    schedulePersist()
+    return { ok: true, policy: policyForSession(session) }
+  }
+
+  if (scope.cwd) {
+    await saveProjectPolicy(scope.cwd, policy)
+    const key = projectPolicyKey(scope.cwd)
+    sessions.forEach((session) => {
+      if (projectPolicyKey(session.cwd) === key)
+        appendEvent(session, 'policy-updated', 'Project watchdog policy updated')
+    })
+  } else {
+    await saveActivePolicy(policy)
+    sessions.forEach((session) => {
+      if (!projectPolicies.has(projectPolicyKey(session.cwd)))
+        appendEvent(session, 'policy-updated', 'Default watchdog policy updated')
+    })
+  }
+
   return { ok: true, policy }
+}
+
+async function resetWatchdogPolicy(payload: unknown) {
+  const scope = parsePolicyScope(payload)
+  if (scope.sessionId) {
+    const session = sessions.get(scope.sessionId)
+    if (!session) return activePolicy
+    session.sessionOverrides = undefined
+    appendEvent(session, 'policy-reset', 'Session watchdog policy reloaded from project')
+    schedulePersist()
+    return policyForSession(session)
+  }
+
+  if (scope.cwd) {
+    await resetProjectPolicy(scope.cwd)
+    const key = projectPolicyKey(scope.cwd)
+    sessions.forEach((session) => {
+      if (projectPolicyKey(session.cwd) === key)
+        appendEvent(session, 'policy-reset', 'Project watchdog policy reset to default')
+    })
+    return policyForCwd(scope.cwd)
+  }
+
+  await saveActivePolicy(defaultWatchdogPolicy)
+  sessions.forEach((session) => {
+    if (!projectPolicies.has(projectPolicyKey(session.cwd)))
+      appendEvent(session, 'policy-reset', 'Default watchdog policy reset')
+  })
+  return activePolicy
 }
 
 function parseSessionConfig(value: unknown): CliSessionConfig | null {
@@ -792,6 +979,14 @@ function parseSessionConfig(value: unknown): CliSessionConfig | null {
 
 function parseSessionId(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 && value.length <= 128 ? value : null
+}
+
+function parseRenamePayload(value: unknown) {
+  if (!isRecord(value)) return null
+  const id = parseSessionId(value.id)
+  const title = readOptionalString(value.title, MAX_TITLE_CHARS)
+  if (!id || title === undefined || title === null || !title.trim()) return null
+  return { id, title: title.trim() }
 }
 
 function parseControlPayload(value: unknown) {
@@ -961,6 +1156,7 @@ function createWindow() {
     title: 'Continuous CLI Cockpit',
     titleBarStyle: 'hidden',
     backgroundColor: '#05070a',
+    icon: appIconPath,
     show: true,
     webPreferences: {
       preload: join(__dirname, '../preload/preload.cjs'),
@@ -1130,8 +1326,8 @@ function doneFlagCandidates(session: CliSession, marker: string) {
   ]
 }
 
-function collectDoneFlagMatches(session: CliSession): DoneFlagMatch[] {
-  return activePolicy.doneMarkers.flatMap((marker) => {
+function collectDoneFlagMatches(session: CliSession, policy: WatchdogPolicy): DoneFlagMatch[] {
+  return policy.doneMarkers.flatMap((marker) => {
     const trimmed = marker.trim()
     if (!trimmed || !isDoneFlagMarker(trimmed)) return []
     const matchedPath = doneFlagCandidates(session, trimmed).find((candidate) => existsSync(candidate))
@@ -1139,13 +1335,16 @@ function collectDoneFlagMatches(session: CliSession): DoneFlagMatch[] {
   })
 }
 
-function classifierPolicy(): WatchdogClassifierPolicy {
+function classifierPolicy(
+  policy: WatchdogPolicy,
+  compiledPolicy: ReturnType<typeof compilePolicyPatterns>,
+): WatchdogClassifierPolicy {
   return {
-    blockedPatterns: compiledBlockedPatterns,
-    doneMarkers: activePolicy.doneMarkers,
-    manualInterventionEnabled: activePolicy.circuitBreaker.enabled,
-    manualInterventionPatterns: compiledManualInterventionPatterns,
-    waitingPatterns: compiledWaitingPatterns,
+    blockedPatterns: compiledPolicy.blockedPatterns,
+    doneMarkers: policy.doneMarkers,
+    manualInterventionEnabled: policy.circuitBreaker.enabled,
+    manualInterventionPatterns: compiledPolicy.manualInterventionPatterns,
+    waitingPatterns: compiledPolicy.waitingPatterns,
   }
 }
 
@@ -1156,10 +1355,11 @@ function watchdogOutputSource(session: CliSession) {
 }
 
 function classifyTerminal(session: CliSession) {
+  const policy = policyForSession(session)
   return classifyWatchdogOutput({
-    doneFlagMatches: collectDoneFlagMatches(session),
+    doneFlagMatches: collectDoneFlagMatches(session, policy),
     output: watchdogOutputSource(session),
-    policy: classifierPolicy(),
+    policy: classifierPolicy(policy, compiledPolicyForSession(session)),
   })
 }
 
@@ -1174,7 +1374,10 @@ function snapshot(session: CliSession): CliSnapshot {
   void ruleRetryCounts
   void screenText
   void screenCapturedAt
-  return value
+  return {
+    ...value,
+    hasSessionPolicyOverride: !!session.sessionOverrides,
+  }
 }
 
 function broadcast(channel: string, payload: unknown) {
@@ -1260,7 +1463,7 @@ function updateStatus(session: CliSession, status: CliStatus, reason: string) {
 }
 
 function appendOutput(session: CliSession, data: string) {
-  session.outputTail = `${session.outputTail}${data}`.slice(-activePolicy.outputTailLimit)
+  session.outputTail = `${session.outputTail}${data}`.slice(-policyForSession(session).outputTailLimit)
   session.lastOutputAt = Date.now()
   void appendTranscript(session, data).catch((error) => {
     appendEvent(session, 'transcript-write-failed', error.message)
@@ -1273,7 +1476,7 @@ function appendOutput(session: CliSession, data: string) {
 }
 
 function canInject(session: CliSession) {
-  return Date.now() - session.lastInjectAt >= activePolicy.injectCooldownMs
+  return Date.now() - session.lastInjectAt >= policyForSession(session).injectCooldownMs
 }
 
 function renderPolicyTemplate(template: string, session: CliSession, reason: string) {
@@ -1765,7 +1968,7 @@ async function localContinue(session: CliSession, reason: string, promptTemplate
 }
 
 function countRecentEvents(session: CliSession, predicate: (event: CliEvent) => boolean) {
-  const windowStart = Date.now() - activePolicy.circuitBreaker.windowMs
+  const windowStart = Date.now() - policyForSession(session).circuitBreaker.windowMs
   return session.events.filter((event) => event.time >= windowStart && predicate(event)).length
 }
 
@@ -1787,21 +1990,22 @@ function interruptAutopilot(session: CliSession, reason: string, detail?: string
 }
 
 function openCircuitIfNeeded(session: CliSession, reason: string) {
-  if (!activePolicy.circuitBreaker.enabled) return false
+  const policy = policyForSession(session)
+  if (!policy.circuitBreaker.enabled) return false
   const recentActions = countRecentRecoveryActions(session)
-  if (recentActions < activePolicy.circuitBreaker.maxRecoveries) return false
+  if (recentActions < policy.circuitBreaker.maxRecoveries) return false
 
   interruptAutopilot(
     session,
     'recovery circuit breaker opened',
-    `${reason}. ${recentActions} recovery actions in ${activePolicy.circuitBreaker.windowMs}ms.`,
+    `${reason}. ${recentActions} recovery actions in ${policy.circuitBreaker.windowMs}ms.`,
   )
   return true
 }
 
 function resolveRecoveryRule(session: CliSession, state: RecoveryState) {
-  const candidates = activePolicy.recoveryRules
-    .filter((rule) => rule.enabled && rule.state === state)
+  const candidates = policyForSession(session)
+    .recoveryRules.filter((rule) => rule.enabled && rule.state === state)
     .sort((left, right) => right.priority - left.priority)
 
   return candidates.find((rule) => countRecentRuleAttempts(session, rule.id) < rule.maxRetries) ?? null
@@ -1916,6 +2120,7 @@ async function restorePersistedSessions() {
     const session: CliSession = {
       ...saved,
       runnerBackend: saved.runnerBackend || 'pty',
+      sessionOverrides: saved.sessionOverrides ? normalizeWatchdogPolicy(saved.sessionOverrides) : undefined,
       outputTail: saved.outputTail || '',
       screenText: '',
       screenCapturedAt: 0,
@@ -2009,13 +2214,14 @@ function classify(session: CliSession) {
   }
 
   const idleMs = Date.now() - session.lastOutputAt
-  if (idleMs >= activePolicy.hardStallMs) {
+  const policy = policyForSession(session)
+  if (idleMs >= policy.hardStallMs) {
     updateStatus(session, 'blocked', 'hard idle timeout')
     maybeAutopilotRecover(session, 'hard idle timeout', 'hard_stall')
     return
   }
 
-  if (idleMs >= activePolicy.softStallMs) {
+  if (idleMs >= policy.softStallMs) {
     updateStatus(session, 'stalled', 'soft idle timeout')
     maybeAutopilotRecover(session, 'soft idle timeout', 'soft_stall')
     return
@@ -2064,6 +2270,7 @@ async function createSession(config: CliSessionConfig) {
     screenCapturedAt: 0,
     transcriptPath: transcriptFilePath(id),
     lastSuggestedPrompt: '',
+    sessionOverrides: undefined,
     events: [],
     attached: false,
     ruleRetryCounts: {},
@@ -2145,6 +2352,16 @@ async function stopSession(id: string) {
   }
 }
 
+function renameSession(id: string, title: string) {
+  const session = sessions.get(id)
+  if (!session) return false
+  const previousTitle = session.title
+  session.title = title
+  appendEvent(session, 'session-renamed', `Session renamed to ${title}`, previousTitle)
+  schedulePersist()
+  return snapshot(session)
+}
+
 function safeExportName(value: string) {
   const safe = value.trim().replace(/[^a-zA-Z0-9._-]+/g, '_')
   return safe.slice(0, 80) || 'session'
@@ -2162,7 +2379,11 @@ async function exportSession(id: string): Promise<SessionExportResult | false> {
   await writeFile(join(exportDir, 'session.json'), `${JSON.stringify(sessionSnapshot, null, 2)}\n`, 'utf8')
   await writeFile(join(exportDir, 'events.json'), `${JSON.stringify(session.events, null, 2)}\n`, 'utf8')
   await writeFile(join(exportDir, 'output-tail.txt'), session.outputTail, 'utf8')
-  await writeFile(join(exportDir, 'watchdog-policy.json'), `${JSON.stringify(activePolicy, null, 2)}\n`, 'utf8')
+  await writeFile(
+    join(exportDir, 'watchdog-policy.json'),
+    `${JSON.stringify(policyForSession(session), null, 2)}\n`,
+    'utf8',
+  )
 
   if (session.lastSuggestedPrompt) {
     await writeFile(join(exportDir, 'last-recovery-suggestion.md'), session.lastSuggestedPrompt, 'utf8')
@@ -2284,11 +2505,19 @@ function runWatchdogTick() {
   })
 }
 
+function watchdogCheckIntervalMs() {
+  const intervals = [
+    activePolicy.checkIntervalMs,
+    ...Array.from(projectPolicies.values()).map((entry) => entry.policy.checkIntervalMs),
+  ]
+  return Math.max(1_000, Math.min(...intervals))
+}
+
 function scheduleWatchdogTick() {
   setTimeout(() => {
     runWatchdogTick()
     scheduleWatchdogTick()
-  }, activePolicy.checkIntervalMs)
+  }, watchdogCheckIntervalMs())
 }
 
 ipcMain.handle('app:defaults', () => ({
@@ -2301,17 +2530,18 @@ ipcMain.handle('app:defaults', () => ({
 
 ipcMain.handle('app:health', () => getRuntimeHealth())
 
-ipcMain.handle('policy:get', () => activePolicy)
+ipcMain.handle('policy:get', (_event, payload: unknown) => {
+  const scope = parsePolicyScope(payload)
+  if (scope.sessionId) {
+    const session = sessions.get(scope.sessionId)
+    if (session) return policyForSession(session)
+  }
+  return policyForCwd(scope.cwd)
+})
 
 ipcMain.handle('policy:set', (_event, payload: unknown) => updateWatchdogPolicy(payload))
 
-ipcMain.handle('policy:reset', async () => {
-  await saveActivePolicy(defaultWatchdogPolicy)
-  sessions.forEach((session) => {
-    appendEvent(session, 'policy-reset', 'Watchdog policy reset to defaults')
-  })
-  return activePolicy
-})
+ipcMain.handle('policy:reset', (_event, payload: unknown) => resetWatchdogPolicy(payload))
 
 ipcMain.handle('policy:export', () => exportJsonConfig('watchdog-policy', activePolicy))
 
@@ -2384,6 +2614,11 @@ ipcMain.handle('cli:reattach', async (_event, payload: unknown) => {
   if (!session || session.runnerBackend !== 'tmux') return false
   const ok = await attachTmuxSession(session)
   return ok ? snapshot(session) : false
+})
+
+ipcMain.handle('cli:rename', (_event, payload: unknown) => {
+  const parsed = parseRenamePayload(payload)
+  return parsed ? renameSession(parsed.id, parsed.title) : false
 })
 
 ipcMain.handle('cli:set-control', (_event, rawPayload: unknown) => {
@@ -2511,6 +2746,7 @@ if (!singleInstanceLock) {
 
   app.whenReady().then(async () => {
     await loadWatchdogPolicy()
+    await loadProjectPolicies()
     await loadPresetCatalog()
     await restorePersistedSessions()
     createWindow()

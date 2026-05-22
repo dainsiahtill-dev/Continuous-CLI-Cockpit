@@ -7,6 +7,7 @@ Electron + Vite + React + TypeScript + TailwindCSS cockpit for running real comm
 - [User Guide](docs/USER_GUIDE.md)
 - [Blueprint](docs/BLUEPRINT.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Control System Architecture](docs/CONTROL_SYSTEM_ARCHITECTURE.md)
 - [Recovery Policy](docs/RECOVERY_POLICY.md)
 - [Operations Runbook](docs/RUNBOOK.md)
 - [Implementation Status](docs/IMPLEMENTATION_STATUS.md)
@@ -29,7 +30,10 @@ The cockpit adds observation, history, recovery suggestions, prompt-file injecti
 - Writes per-session full transcripts.
 - Exports session audit bundles.
 - Uses a local watchdog policy file for Autopilot thresholds, patterns, recovery routing, and circuit breaking.
+- Supports project-scoped Autopilot policy overrides by working directory.
+- Supports session-scoped Copy-on-Write policy overrides for isolated prompt experiments.
 - Imports, exports, edits, validates, and resets watchdog policies from the UI.
+- Lets session tabs be renamed and persists those names with the session.
 - Checks tmux and WSL runtime health from the Cockpit panel.
 - Searches transcript files with bounded line rendering and timeline-seeded search.
 - Shows session-level diagnostics for tmux sessions, including capture tail.
@@ -87,9 +91,12 @@ Full transcripts, policies, and exports are stored under:
 ```text
 <Electron userData>/continuous/transcripts/
 <Electron userData>/continuous/policies/default.json
+<Electron userData>/continuous/policies/projects.json
 <Electron userData>/continuous/presets/default.json
 <Electron userData>/continuous/exports/
 ```
+
+Project policies are selected by session working directory. A session can also carry its own Copy-on-Write override. If neither exists, the session uses the default policy.
 
 ## CLI Flow
 

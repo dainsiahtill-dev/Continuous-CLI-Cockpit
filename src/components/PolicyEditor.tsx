@@ -4,6 +4,9 @@ import { formatDuration } from '../domain/cli'
 import type { RecoveryAction, RecoveryRule, RecoveryState, WatchdogPolicy } from '../types/electron'
 
 type PolicyEditorProps = {
+  hasSessionPolicyOverride: boolean
+  scopeCwd: string | undefined
+  scopeSessionId: string | undefined
   policy: WatchdogPolicy
   onSaved: (policy: WatchdogPolicy) => void
 }
@@ -71,7 +74,13 @@ const actionLabels: Record<RecoveryAction, string> = {
 /**
  * Edits the watchdog policy, including state-to-action recovery routing.
  */
-export function PolicyEditor({ policy, onSaved }: PolicyEditorProps) {
+export function PolicyEditor({
+  hasSessionPolicyOverride,
+  policy,
+  scopeCwd,
+  scopeSessionId,
+  onSaved,
+}: PolicyEditorProps) {
   const [draft, setDraft] = useState(() => toDraft(policy))
   const [errors, setErrors] = useState<string[]>([])
   const [isSaving, setIsSaving] = useState(false)
@@ -88,7 +97,13 @@ export function PolicyEditor({ policy, onSaved }: PolicyEditorProps) {
 
     setIsSaving(true)
     try {
-      const result = await window.cliAPI.setPolicy(nextPolicy)
+      const result = await window.cliAPI.setPolicy(
+        scopeSessionId
+          ? { sessionId: scopeSessionId, policy: nextPolicy }
+          : scopeCwd
+            ? { cwd: scopeCwd, policy: nextPolicy }
+            : nextPolicy,
+      )
       if (result.ok) {
         setErrors([])
         setDraft(toDraft(result.policy))
@@ -101,10 +116,37 @@ export function PolicyEditor({ policy, onSaved }: PolicyEditorProps) {
     }
   }
 
-  const reset = async () => {
+  const saveToProject = async () => {
+    if (!scopeCwd) return
+    const nextPolicy = toPolicy(draft)
+    const localErrors = validatePolicyDraft(nextPolicy)
+    if (localErrors.length > 0) {
+      setErrors(localErrors)
+      return
+    }
+
     setIsSaving(true)
     try {
-      const nextPolicy = await window.cliAPI.resetPolicy()
+      const result = await window.cliAPI.setPolicy({ cwd: scopeCwd, policy: nextPolicy })
+      if (!result.ok) {
+        setErrors(result.errors)
+        return
+      }
+      const promoted = scopeSessionId ? await window.cliAPI.resetPolicy({ sessionId: scopeSessionId }) : result.policy
+      setErrors([])
+      setDraft(toDraft(promoted))
+      onSaved(promoted)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const reloadFromParent = async () => {
+    setIsSaving(true)
+    try {
+      const nextPolicy = await window.cliAPI.resetPolicy(
+        scopeSessionId ? { sessionId: scopeSessionId } : scopeCwd ? { cwd: scopeCwd } : undefined,
+      )
       setErrors([])
       setDraft(toDraft(nextPolicy))
       onSaved(nextPolicy)
@@ -126,8 +168,15 @@ export function PolicyEditor({ policy, onSaved }: PolicyEditorProps) {
     <div className="mt-4 rounded-md border border-cyan-300/12 bg-black/20 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-cyan-200">
         <ShieldAlert size={14} aria-hidden="true" />
-        Autopilot policy
+        {scopeSessionId
+          ? hasSessionPolicyOverride
+            ? 'Session override policy'
+            : 'Project synced policy'
+          : scopeCwd
+            ? 'Project autopilot policy'
+            : 'Default autopilot policy'}
       </div>
+      {scopeCwd && <div className="mb-3 truncate font-mono text-[11px] text-zinc-500">{scopeCwd}</div>}
 
       <div className="grid grid-cols-2 gap-2">
         <NumberField
@@ -299,11 +348,17 @@ export function PolicyEditor({ policy, onSaved }: PolicyEditorProps) {
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button className="tool-button" type="button" disabled={isSaving} onClick={() => void save()}>
           <Save size={14} aria-hidden="true" />
-          Save policy
+          {scopeSessionId ? 'Save session' : 'Save policy'}
         </button>
-        <button className="tool-button" type="button" disabled={isSaving} onClick={() => void reset()}>
+        {scopeSessionId && scopeCwd && (
+          <button className="tool-button" type="button" disabled={isSaving} onClick={() => void saveToProject()}>
+            <Save size={14} aria-hidden="true" />
+            Save to project
+          </button>
+        )}
+        <button className="tool-button" type="button" disabled={isSaving} onClick={() => void reloadFromParent()}>
           <RotateCcw size={14} aria-hidden="true" />
-          Reset
+          {scopeSessionId ? 'Reload project' : 'Reset'}
         </button>
       </div>
     </div>

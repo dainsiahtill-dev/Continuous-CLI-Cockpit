@@ -115,6 +115,12 @@ Watchdog policy:
 <Electron userData>\continuous\policies\default.json
 ```
 
+Project-scoped watchdog policies:
+
+```text
+<Electron userData>\continuous\policies\projects.json
+```
+
 CLI presets:
 
 ```text
@@ -209,9 +215,15 @@ Inspect the policy file if the classification is too aggressive:
 <Electron userData>\continuous\policies\default.json
 ```
 
-After editing policy, restart the app so the main process reloads it.
+If only one project behaves incorrectly, inspect the project policy override:
 
-You can also edit and save the policy directly from the Cockpit panel. Invalid regex patterns are rejected before they reach the watchdog.
+```text
+<Electron userData>\continuous\policies\projects.json
+```
+
+After editing policy files manually, restart the app so the main process reloads them.
+
+You can also edit and save the policy directly from the Cockpit panel. With an active session, edits are saved as a session override first. Use `Save to project` only after the override should become shared project behavior. Invalid regex patterns are rejected before they reach the watchdog.
 
 Use `Export policy` and `Import policy` in Operations to move a known-good policy between machines. Imported policies are validated before they are applied.
 

@@ -7,8 +7,10 @@ const listen = <T>(channel: string, callback: (payload: T) => void) => {
 }
 
 type SessionConfigPayload = Record<string, unknown>
+type PolicyPayload = Record<string, unknown>
 type ControlPayload = Record<string, unknown>
 type PromptPayload = Record<string, unknown>
+type RenamePayload = { id: string; title: string }
 type TerminalInputPayload = { id: string; data: string }
 type ResizePayload = { id: string; cols: number; rows: number }
 type TerminalDataPayload = { id: string; data: string }
@@ -19,9 +21,9 @@ type SessionSnapshotPayload = Record<string, unknown>
 contextBridge.exposeInMainWorld('cliAPI', {
   getDefaults: () => ipcRenderer.invoke('app:defaults'),
   getHealth: () => ipcRenderer.invoke('app:health'),
-  getPolicy: () => ipcRenderer.invoke('policy:get'),
-  setPolicy: (policy: Record<string, unknown>) => ipcRenderer.invoke('policy:set', policy),
-  resetPolicy: () => ipcRenderer.invoke('policy:reset'),
+  getPolicy: (scope?: PolicyPayload) => ipcRenderer.invoke('policy:get', scope),
+  setPolicy: (policy: PolicyPayload) => ipcRenderer.invoke('policy:set', policy),
+  resetPolicy: (scope?: PolicyPayload) => ipcRenderer.invoke('policy:reset', scope),
   exportPolicy: () => ipcRenderer.invoke('policy:export'),
   importPolicy: () => ipcRenderer.invoke('policy:import'),
   getPresets: () => ipcRenderer.invoke('presets:get'),
@@ -35,6 +37,7 @@ contextBridge.exposeInMainWorld('cliAPI', {
   createSession: (config: SessionConfigPayload) => ipcRenderer.invoke('cli:create', config),
   stopSession: (id: string) => ipcRenderer.invoke('cli:stop', id),
   reattachSession: (id: string) => ipcRenderer.invoke('cli:reattach', id),
+  renameSession: (payload: RenamePayload) => ipcRenderer.invoke('cli:rename', payload),
   setControl: (payload: ControlPayload) => ipcRenderer.invoke('cli:set-control', payload),
   injectLocalContinue: (id: string) => ipcRenderer.invoke('cli:inject-local', id),
   injectPrompt: (payload: PromptPayload) => ipcRenderer.invoke('cli:inject-prompt', payload),

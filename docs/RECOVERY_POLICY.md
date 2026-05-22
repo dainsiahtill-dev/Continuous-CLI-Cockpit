@@ -2,17 +2,49 @@
 
 Autopilot is policy-driven. The terminal watchdog only observes and classifies; the recovery policy decides what action is allowed.
 
+Treat each recovery rule as a scientific hypothesis:
+
+```text
+When this terminal state is observed in this project context,
+this bounded action should increase progress without increasing risk.
+```
+
+If evidence contradicts the hypothesis, narrow the rule, disable it, or move it behind a safer action.
+
 ## Decision Flow
 
 ```text
 terminal output / process state
   -> watchdog classifier
        waiting | soft_stall | hard_stall | blocked | exited | manual_intervention
+  -> default or project policy lookup
   -> recovery rule routing
        inject_local_prompt | trigger_fallback_agent | auto_resume | interrupt
   -> circuit breaker
   -> audited action
 ```
+
+## Policy Scope
+
+The default policy is stored at:
+
+```text
+<Electron userData>/continuous/policies/default.json
+```
+
+Project policies are stored at:
+
+```text
+<Electron userData>/continuous/policies/projects.json
+```
+
+When a session has an active working directory, the Cockpit resolves policy through this cascade:
+
+```text
+default policy <- project policy by cwd <- session override by session id
+```
+
+Normal edits in an active session create a session override. This is copy-on-write behavior: the session starts synchronized with the project policy, but the first edit becomes local to that session. `Save to project` promotes the session draft to the project policy and clears the session override. `Reload project` discards the session override and returns to the project policy. If no project policy exists, the session uses the default policy.
 
 ## Default Routing
 

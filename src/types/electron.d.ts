@@ -86,6 +86,13 @@ export type RuntimeHealth = {
 
 export type PolicySaveResult = { ok: true; policy: WatchdogPolicy } | { ok: false; errors: string[] }
 
+export type PolicyScope = {
+  cwd?: string
+  sessionId?: string
+}
+
+export type PolicySetPayload = WatchdogPolicy | (PolicyScope & { policy: WatchdogPolicy })
+
 export type PresetSaveResult = { ok: true; presets: Record<CliPreset, CliPresetInfo> } | { ok: false; errors: string[] }
 
 export type ConfigFileResult = {
@@ -157,6 +164,8 @@ export type CliSessionSnapshot = {
   outputTail: string
   transcriptPath: string
   lastSuggestedPrompt: string
+  sessionOverrides?: WatchdogPolicy
+  hasSessionPolicyOverride: boolean
   events: CliEvent[]
   attached: boolean
 }
@@ -174,9 +183,9 @@ declare global {
     cliAPI: {
       getDefaults: () => Promise<CliDefaults>
       getHealth: () => Promise<RuntimeHealth>
-      getPolicy: () => Promise<WatchdogPolicy>
-      setPolicy: (policy: WatchdogPolicy) => Promise<PolicySaveResult>
-      resetPolicy: () => Promise<WatchdogPolicy>
+      getPolicy: (scope?: PolicyScope) => Promise<WatchdogPolicy>
+      setPolicy: (policy: PolicySetPayload) => Promise<PolicySaveResult>
+      resetPolicy: (scope?: PolicyScope) => Promise<WatchdogPolicy>
       exportPolicy: () => Promise<ConfigFileResult>
       importPolicy: () => Promise<PolicySaveResult>
       getPresets: () => Promise<Record<CliPreset, CliPresetInfo>>
@@ -190,6 +199,7 @@ declare global {
       createSession: (config: CliSessionConfig) => Promise<CliSessionSnapshot>
       stopSession: (id: string) => Promise<boolean>
       reattachSession: (id: string) => Promise<CliSessionSnapshot | false>
+      renameSession: (payload: { id: string; title: string }) => Promise<CliSessionSnapshot | false>
       setControl: (payload: {
         id: string
         runMode?: RunMode

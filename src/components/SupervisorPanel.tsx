@@ -77,7 +77,7 @@ export function SupervisorPanel({
   const controls = useSessionControls(activeSession, onUpdated)
   const runtimeHealth = useRuntimeHealth()
   const [now, setNow] = useState(() => Date.now())
-  const [policyOverride, setPolicyOverride] = useState<WatchdogPolicy | null>(null)
+  const [loadedPolicy, setLoadedPolicy] = useState<{ key: string; policy: WatchdogPolicy } | null>(null)
   const [transcriptQuery, setTranscriptQuery] = useState('')
   const [activeTab, setActiveTab] = useState<CockpitTab>(() => (activeSession ? 'session' : 'launch'))
 
@@ -86,7 +86,24 @@ export function SupervisorPanel({
     return () => window.clearInterval(timer)
   }, [])
 
-  const policy = policyOverride ?? defaults?.policy ?? null
+  const policyCwd = activeSession?.cwd
+  const policySessionId = activeSession?.id
+  const policyKey = policySessionId ?? policyCwd ?? 'default'
+
+  useEffect(() => {
+    let cancelled = false
+    window.cliAPI
+      .getPolicy(policySessionId ? { sessionId: policySessionId } : policyCwd ? { cwd: policyCwd } : undefined)
+      .then((nextPolicy) => {
+        if (!cancelled) setLoadedPolicy({ key: policyKey, policy: nextPolicy })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeSession?.hasSessionPolicyOverride, policyCwd, policyKey, policySessionId])
+
+  const policy = loadedPolicy?.key === policyKey ? loadedPolicy.policy : (defaults?.policy ?? null)
+  const setScopedPolicy = (nextPolicy: WatchdogPolicy) => setLoadedPolicy({ key: policyKey, policy: nextPolicy })
   const uptime = activeSession ? now - activeSession.startedAt : 0
   const idle = activeSession ? now - activeSession.lastOutputAt : 0
   const cooldownMs = policy?.injectCooldownMs ?? 120_000
@@ -145,7 +162,10 @@ export function SupervisorPanel({
             cooldown={cooldown}
             now={now}
             policy={policy}
-            setPolicyOverride={setPolicyOverride}
+            policyCwd={policyCwd}
+            policySessionId={policySessionId}
+            hasSessionPolicyOverride={activeSession?.hasSessionPolicyOverride ?? false}
+            setPolicy={setScopedPolicy}
           />
         )}
 
@@ -155,7 +175,7 @@ export function SupervisorPanel({
             controls={controls}
             onDefaultsUpdated={onDefaultsUpdated}
             onSessionsUpdated={onSessionsUpdated}
-            policyUpdated={setPolicyOverride}
+            policyUpdated={setScopedPolicy}
             setTranscriptQuery={setTranscriptQuery}
             transcriptQuery={transcriptQuery}
           />
@@ -269,17 +289,31 @@ function AutomationTab({
   activeSession,
   controls,
   cooldown,
+  hasSessionPolicyOverride,
   now,
   policy,
-  setPolicyOverride,
+  policyCwd,
+  policySessionId,
+  setPolicy,
 }: {
   activeSession: CliSessionSnapshot | undefined
   controls: SessionControls
   cooldown: number
+  hasSessionPolicyOverride: boolean
   now: number
   policy: WatchdogPolicy | null
-  setPolicyOverride: (policy: WatchdogPolicy) => void
+  policyCwd: string | undefined
+  policySessionId: string | undefined
+  setPolicy: (policy: WatchdogPolicy) => void
 }) {
+  const policySource = policySessionId
+    ? hasSessionPolicyOverride
+      ? 'Session Override'
+      : 'Project Default'
+    : policyCwd
+      ? 'Project Policy'
+      : 'Default Policy'
+
   return (
     <div className="space-y-4">
       {activeSession ? (
@@ -325,12 +359,25 @@ function AutomationTab({
         />
       )}
 
-      {policy && <PolicyPreview policy={policy} />}
+      {policy && <PolicyPreview policy={policy} source={policySource} />}
 
       {policy && (
         <details className="advanced-section">
-          <summary>Advanced policy editor</summary>
-          <PolicyEditor key={policySignature(policy)} policy={policy} onSaved={setPolicyOverride} />
+          <summary>
+            {policySessionId
+              ? hasSessionPolicyOverride
+                ? 'Session override policy editor'
+                : 'Project-synced policy editor'
+              : 'Default policy editor'}
+          </summary>
+          <PolicyEditor
+            key={`${policySessionId ?? policyCwd ?? 'default'}:${policySignature(policy)}`}
+            hasSessionPolicyOverride={hasSessionPolicyOverride}
+            policy={policy}
+            scopeCwd={policyCwd}
+            scopeSessionId={policySessionId}
+            onSaved={setPolicy}
+          />
         </details>
       )}
     </div>
@@ -381,6 +428,7 @@ function LogsTab({
       />
       <TimelineList activeSession={activeSession} setTranscriptQuery={setTranscriptQuery} />
       <OperationsPanel
+        policyCwd={activeSession.cwd}
         onDefaultsUpdated={onDefaultsUpdated}
         onPolicyUpdated={policyUpdated}
         onSessionsUpdated={onSessionsUpdated}
@@ -543,10 +591,15 @@ function HealthRow({ label, item }: { label: string; item: RuntimeHealthItem | n
   )
 }
 
-function PolicyPreview({ policy }: { policy: WatchdogPolicy }) {
+function PolicyPreview({ policy, source }: { policy: WatchdogPolicy; source: string }) {
   return (
     <section className="section-box">
-      <div className="mb-2 text-xs font-semibold text-cyan-200">Autopilot policy</div>
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-cyan-200">
+        <span>Autopilot policy</span>
+        <span className="rounded border border-cyan-300/20 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
+          {source}
+        </span>
+      </div>
       <div className="grid grid-cols-2 gap-2 text-xs">
         <Metric label="Soft stall" value={formatDuration(policy.softStallMs)} />
         <Metric label="Hard stall" value={formatDuration(policy.hardStallMs)} />

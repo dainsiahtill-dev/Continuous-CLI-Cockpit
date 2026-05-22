@@ -109,6 +109,10 @@ The selected session also shows an `Autopilot pipeline` in the Cockpit panel:
 
 The panel shows the current decision reason, local retry count, cooldown timing, and the last prompt file path when available. Use `Interrupt` to immediately switch the session back to Manual mode and disable the watchdog.
 
+## Session Names
+
+Session tabs can be renamed. Double-click the tab title, or click the pencil icon on the tab, then press Enter or leave the field to save. Names are stored with the session snapshot and are restored on app launch.
+
 ## Prompt Injection
 
 Long prompts are not pasted directly into the terminal. The app writes them under:
@@ -183,9 +187,24 @@ The policy file lives at:
 <Electron userData>/continuous/policies/default.json
 ```
 
+Project policy overrides live at:
+
+```text
+<Electron userData>/continuous/policies/projects.json
+```
+
 It controls done markers, waiting patterns, blocked patterns, manual-stop patterns, timeouts, output-tail size, injection cooldown, and state-to-action recovery rules.
 
-Use `Autopilot policy` in the Cockpit panel to edit the policy. Invalid regular expressions and invalid recovery rules are shown before saving. `Reset` restores defaults.
+Use `Autopilot policy` in the Cockpit panel to edit the policy. When a session is active, edits are saved as a session override first. This protects other sessions in the same project from experimental prompt changes.
+
+The policy editor exposes these lifecycle actions:
+
+- `Save session`: saves the current draft only to the selected session.
+- `Save to project`: promotes the current draft to the project policy for the session working directory, then clears the selected session override.
+- `Reload project`: discards the selected session override and reloads the project policy.
+- `Reset`: when no session is active, restores the default policy.
+
+When no session is active, edits apply to the default policy. Invalid regular expressions and invalid recovery rules are shown before saving.
 
 The default recovery routing is:
 

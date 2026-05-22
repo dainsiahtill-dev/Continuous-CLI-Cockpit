@@ -3,6 +3,7 @@ import { useState } from 'react'
 import type { CliDefaults, CliSessionSnapshot, WatchdogPolicy } from '../types/electron'
 
 type OperationsPanelProps = {
+  policyCwd: string | undefined
   onDefaultsUpdated: () => Promise<CliDefaults>
   onSessionsUpdated: () => Promise<CliSessionSnapshot[]>
   onPolicyUpdated: (policy: WatchdogPolicy) => void
@@ -11,7 +12,12 @@ type OperationsPanelProps = {
 /**
  * Provides import/export and cleanup actions that affect app-level state.
  */
-export function OperationsPanel({ onDefaultsUpdated, onSessionsUpdated, onPolicyUpdated }: OperationsPanelProps) {
+export function OperationsPanel({
+  policyCwd,
+  onDefaultsUpdated,
+  onSessionsUpdated,
+  onPolicyUpdated,
+}: OperationsPanelProps) {
   const [message, setMessage] = useState('')
   const [isRunning, setIsRunning] = useState(false)
 
@@ -98,8 +104,8 @@ export function OperationsPanel({ onDefaultsUpdated, onSessionsUpdated, onPolicy
             void run(async () => {
               const result = await window.cliAPI.importPolicy()
               if (!result.ok) return result.errors.join(' ')
-              onPolicyUpdated(result.policy)
               await onDefaultsUpdated()
+              onPolicyUpdated(await window.cliAPI.getPolicy(policyCwd ? { cwd: policyCwd } : undefined))
               return 'Policy imported.'
             })
           }
